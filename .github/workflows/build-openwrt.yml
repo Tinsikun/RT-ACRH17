@@ -19,7 +19,7 @@ on:
         required: true
         default: 'true'
   schedule:
-    - cron: '37 14 * * 7'  # 每周日 14:30 定时触发构建
+    - cron: '37 14 * * 0'  # 每周日 14:30 定时触发构建
 
 env:
   REPO_URL: https://github.com/coolsnowwolf/lede      # OpenWrt 源码仓库地址
