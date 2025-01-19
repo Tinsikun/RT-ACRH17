@@ -1,0 +1,64 @@
+#
+# Copyright (c) 2019-2021 P3TERX
+#
+# This is free software, licensed under the MIT License.
+# See /LICENSE for more information.
+#
+# https://github.com/P3TERX/Actions-OpenWrt
+# File: .github/workflows/update-checker.yml
+# Description: Source code update checker
+#
+
+name: Update Checker
+
+env:
+  REPO_URL: https://github.com/coolsnowwolf/lede
+  REPO_BRANCH: master
+
+on:
+  workflow_dispatch:  # 支持手动触发工作流
+#  schedule:
+#    - cron: '0 */18 * * *'  # 可选：定期触发更新检查（每18小时）
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Get Commit Hash
+        id: getHash
+        run: |
+          # 克隆指定仓库最新提交
+          git clone --depth 1 $REPO_URL -b $REPO_BRANCH .
+          # 获取最新提交哈希并设置为输出变量
+          COMMIT_HASH=$(git rev-parse HEAD)
+          echo "commitHash=$COMMIT_HASH" >> $GITHUB_OUTPUT
+
+      - name: Compare Commit Hash
+        id: cacheHash
+        uses: actions/cache@v3
+        with:
+          path: .commitHash
+          key: HEAD-${{ steps.getHash.outputs.commitHash }}
+        # 使用缓存来比较上次记录的提交哈希
+
+      - name: Save New Commit Hash
+        if: steps.cacheHash.outputs.cache-hit != 'true'
+        run: |
+          # 保存新的提交哈希到 .commitHash 文件
+          echo "${{ steps.getHash.outputs.commitHash }}" > .commitHash
+
+      - name: Trigger build
+        if: steps.cacheHash.outputs.cache-hit != 'true'
+        uses: peter-evans/repository-dispatch@v1
+        with:
+          token: ${{ secrets.ACTIONS_TRIGGER_PAT }}
+          event-type: Source Code Update
+        # 当检测到新提交时，发送自定义事件以触发其他工作流
+
+      - name: Delete workflow runs
+        uses: GitRML/delete-workflow-runs@main
+        with:
+          retain_days: 1
+          keep_minimum_runs: 1
+        # 清理旧的工作流运行记录以节省空间
