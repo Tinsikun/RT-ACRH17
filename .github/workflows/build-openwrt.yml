@@ -1,7 +1,13 @@
 # Copyright (c) 2019-2026 P3TERX
-# Merged: full deps + ccache/dl cache + all fixes
+# Optimized version: Fixed disk space & token permissions
 
 name: Build OpenWrt
+
+# 添加全局权限，允许创建 Release
+permissions:
+  contents: write
+  actions: read
+  checks: read
 
 on:
   repository_dispatch:
@@ -12,7 +18,7 @@ on:
         required: true
         default: 'true'
   schedule:
-    - cron: '0 19 * * 4'  # 北京时间周五凌晨3点（UTC周四19:00）
+    - cron: '0 3 * * 5'
 
 env:
   REPO_URL: https://github.com/coolsnowwolf/lede
@@ -32,53 +38,91 @@ env:
 jobs:
   build:
     runs-on: ubuntu-22.04
-    timeout-minutes: 360  # 修复2: 6小时，足够覆盖任何正常编译
+    timeout-minutes: 240
 
     steps:
-    - name: Before freeing up disk space
+    # ==================== 磁盘空间管理 ====================
+    - name: Check disk space before cleanup
       run: |
         echo "=============================================================================="
+        echo "Disk space BEFORE cleanup:"
         df -hT
         echo "=============================================================================="
 
-    # 修复1: 替换hugoalh为纯bash，消除PowerShell警告
-    - name: Optimize disk space
+    - name: Extreme disk space cleanup
       run: |
-        sudo docker image prune -af
-        sudo apt-get purge -y \
-          '^dotnet-.*' '^llvm-.*' '^php.*' '^mongodb.*' '^mysql.*' \
-          azure-cli google-cloud-sdk google-chrome-stable firefox \
-          powershell mono-devel libgl1-mesa-dri
-        sudo apt-get autoremove -y
-        sudo apt-get clean
+        echo "Starting extreme cleanup..."
+        
+        # 清理 Docker 镜像
+        docker system prune -a -f || true
+        
+        # 删除所有不需要的大目录
         sudo rm -rf \
-          /usr/local/lib/android \
           /usr/share/dotnet \
+          /usr/local/lib/android \
           /opt/ghc \
           /usr/local/graalvm \
           /usr/local/.ghcup \
           /usr/local/share/powershell \
           /usr/local/share/chromium \
           /usr/local/lib/node_modules \
-          /usr/share/swift
+          /opt/hostedtoolcache/CodeQL \
+          /usr/share/swift \
+          /usr/local/julia* \
+          /usr/local/lib/heroku \
+          /usr/local/share/boost \
+          /usr/lib/jvm \
+          /usr/local/.nvm \
+          /usr/local/gem \
+          /usr/local/aws-* \
+          /usr/local/aws-cli \
+          /usr/local/kubectl \
+          /usr/local/miniconda \
+          /usr/local/php \
+          /usr/local/rustup \
+          /usr/local/sbt \
+          /usr/local/stack \
+          /usr/local/terraform \
+          /usr/local/pypy* \
+          /usr/local/share/texlive
+        
+        # 清理 apt 缓存
+        sudo apt-get clean
+        sudo apt-get autoremove --purge -y
+        
+        # 清理日志
+        sudo journalctl --rotate
+        sudo journalctl --vacuum-time=1s || true
+        
+        # 清理临时文件
+        sudo rm -rf /tmp/*
+        sudo rm -rf /var/tmp/*
+        
+        echo "=============================================================================="
+        echo "Disk space AFTER cleanup:"
+        df -hT
+        echo "=============================================================================="
 
     - name: Maximize build space
       uses: easimon/maximize-build-space@master
       with:
-        root-reserve-mb: 4096
+        root-reserve-mb: 2048
         swap-size-mb: 1024
-        remove-dotnet: 'true'
-        remove-android: 'true'
-        remove-haskell: 'true'
-        remove-codeql: 'true'
+        remove-dotnet: 'false'  # 已经手动删除
+        remove-android: 'false'
+        remove-haskell: 'false'
         remove-docker-images: 'true'
+        remove-temurin: 'true'
+        remove-llvm: 'true'
 
-    - name: Free up disk space complete
+    - name: Final disk space check
       run: |
         echo "=============================================================================="
+        echo "Disk space after maximize-build-space:"
         df -hT
         echo "=============================================================================="
 
+    # ==================== 环境初始化 ====================
     - name: Checkout
       uses: actions/checkout@v4
 
@@ -86,26 +130,107 @@ jobs:
       env:
         DEBIAN_FRONTEND: noninteractive
       run: |
-        sudo -E apt-get update
-        sudo -E apt-get install -y \
-        ack antlr3 asciidoc autoconf automake autopoint binutils bison build-essential \
-        bzip2 ccache cmake cpio curl device-tree-compiler fastjar flex gawk gettext \
-        gcc-multilib g++-multilib git gperf haveged help2man intltool libc6-dev-i386 \
-        libelf-dev libglib2.0-dev libgmp3-dev libltdl-dev libmpc-dev libmpfr-dev \
-        libncurses5-dev libncursesw5-dev libreadline-dev libssl-dev libfuse-dev \
-        libtool lrzsz mkisofs msmtp nano ninja-build p7zip p7zip-full patch pkgconf \
-        python2.7 python3 python3-pyelftools libpython3-dev qemu-utils rsync scons \
-        squashfs-tools subversion swig texinfo uglifyjs upx-ucl unzip vim wget \
-        xmlto xxd zlib1g-dev python3-setuptools liblua5.3-dev lua5.3 libev-dev
-        sudo -E apt-get autoremove --purge
-        sudo -E apt-get clean
-        sudo rm -rf /etc/apt/sources.list.d/* /usr/local/lib/android /opt/ghc \
-        /usr/share/dotnet /usr/local/graalvm /usr/local/.ghcup \
-        /usr/local/share/powershell /usr/local/share/chromium \
-        /usr/local/lib/node_modules
+        # 清理 apt 缓存目录
+        sudo rm -rf /var/cache/apt/archives/*
+        sudo mkdir -p /var/cache/apt/archives/partial
+        
+        sudo apt-get update
+        
+        # 第一批：核心依赖包
+        echo "Installing core dependencies..."
+        sudo apt-get install -y --no-install-recommends \
+          build-essential \
+          libncurses5-dev \
+          libncursesw5-dev \
+          zlib1g-dev \
+          gawk \
+          git \
+          gettext \
+          libssl-dev \
+          xsltproc \
+          wget \
+          unzip \
+          python3 \
+          python3-pip \
+          python3-pyelftools \
+          ccache \
+          cmake \
+          flex \
+          bison \
+          curl \
+          libelf-dev \
+          libfuse-dev \
+          pkgconf \
+          rsync
+        
+        # 清理缓存
+        sudo apt-get clean
+        sudo rm -rf /var/cache/apt/archives/*
+        
+        # 第二批：扩展包
+        echo "Installing extended dependencies..."
+        sudo apt-get install -y --no-install-recommends \
+          ack \
+          antlr3 \
+          asciidoc \
+          autoconf \
+          automake \
+          autopoint \
+          binutils \
+          bzip2 \
+          cpio \
+          device-tree-compiler \
+          fastjar \
+          g++-multilib \
+          gcc-multilib \
+          gperf \
+          haveged \
+          help2man \
+          intltool \
+          libc6-dev-i386 \
+          libgmp3-dev \
+          libltdl-dev \
+          libmpc-dev \
+          libmpfr-dev \
+          libreadline-dev \
+          libtool \
+          lrzsz \
+          mkisofs \
+          msmtp \
+          nano \
+          ninja-build \
+          p7zip \
+          p7zip-full \
+          patch \
+          qemu-utils \
+          scons \
+          squashfs-tools \
+          subversion \
+          swig \
+          texinfo \
+          uglifyjs \
+          upx-ucl \
+          vim \
+          xmlto \
+          xxd \
+          python2.7 \
+          liblua5.3-dev \
+          lua5.3 \
+          libev-dev
+        
+        # 最终清理
+        sudo apt-get clean
+        sudo rm -rf /var/cache/apt/archives/*
+        
+        # 设置时区
         sudo timedatectl set-timezone "$TZ"
+        
+        # 修复工作空间权限
         sudo chown $USER:$GROUPS $GITHUB_WORKSPACE
+        
+        echo "Dependencies installation completed!"
 
+    # ==================== 代码准备 ====================
     - name: Clone source code
       run: git clone --depth=1 $REPO_URL -b $REPO_BRANCH openwrt
 
@@ -132,53 +257,74 @@ jobs:
 
     - name: SSH connection to Actions
       uses: P3TERX/ssh2actions@v1.0.0
-      if: (github.event.inputs.ssh == 'true' && github.event.inputs.ssh != 'false') || contains(github.event.action, 'ssh')
+      if: github.event.inputs.ssh == 'true' || contains(github.event.action, 'ssh')
       env:
         TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
 
+    # ==================== 缓存与编译 ====================
     - name: Cache dl and ccache
       uses: actions/cache@v4
       with:
         path: |
           openwrt/dl
           ${{ env.CCACHE_DIR }}
-        key: ${{ runner.os }}-openwrt-${{ hashFiles('openwrt/feeds.conf.default') }}
+        key: ${{ runner.os }}-openwrt-${{ hashFiles('openwrt/feeds.conf.default', '.config', 'diy-part1.sh', 'diy-part2.sh') }}
+        restore-keys: |
+          ${{ runner.os }}-openwrt-
 
     - name: Download package
       id: package
       run: |
         cd openwrt
         make defconfig
-        make download -j8
+        echo "Downloading packages..."
+        make download -j$(nproc) || make download -j1
         find dl -size -1024c -exec ls -l {} \;
         find dl -size -1024c -exec rm -f {} \;
+        echo "Download completed!"
 
     - name: Compile the firmware
       id: compile
       run: |
         cd openwrt
         export CCACHE_DIR=${{ env.CCACHE_DIR }}
-        ccache -M 5G
+        ccache -M 8G
         echo -e "$(nproc) thread compile"
-        make -j$(nproc) || make -j1 || make -j1 V=s
+        
+        # 编译主流程
+        if make -j$(nproc); then
+          echo "Compilation successful!"
+        else
+          echo "Multi-thread compilation failed, trying single thread with verbose output..."
+          make -j1 V=s 2>&1 | tee build.log
+          exit 1
+        fi
+        
         echo "status=success" >> $GITHUB_OUTPUT
+        
+        # 提取设备名称
         grep '^CONFIG_TARGET.*DEVICE.*=y' .config | sed -r 's/.*DEVICE_(.*)=y/\1/' > DEVICE_NAME
         [ -s DEVICE_NAME ] && echo "DEVICE_NAME=_$(cat DEVICE_NAME)" >> $GITHUB_ENV
         echo "FILE_DATE=_$(date +"%Y%m%d%H%M")" >> $GITHUB_ENV
+        
+        # 显示 ccache 统计
+        ccache -s
 
-    - name: Check space usage
+    - name: Check space usage after compilation
       if: (!cancelled())
       run: df -hT
 
+    # ==================== 上传产物 ====================
     - name: Upload bin directory
       uses: actions/upload-artifact@v4
       if: steps.compile.outputs.status == 'success' && env.UPLOAD_BIN_DIR == 'true'
       with:
         name: OpenWrt_bin${{ env.DEVICE_NAME }}${{ env.FILE_DATE }}
         path: openwrt/bin
+        retention-days: 7
 
-    - name: Organize files
+    - name: Prepare firmware artifacts
       id: organize
       if: steps.compile.outputs.status == 'success' && env.UPLOAD_FIRMWARE == 'true' && !cancelled()
       run: |
@@ -186,6 +332,8 @@ jobs:
         rm -rf packages
         echo "FIRMWARE=$PWD" >> $GITHUB_ENV
         echo "status=success" >> $GITHUB_OUTPUT
+        echo "Firmware prepared at: $PWD"
+        ls -lh
 
     - name: Upload firmware directory
       uses: actions/upload-artifact@v4
@@ -193,10 +341,12 @@ jobs:
       with:
         name: OpenWrt_firmware${{ env.DEVICE_NAME }}${{ env.FILE_DATE }}
         path: ${{ env.FIRMWARE }}
+        retention-days: 7
 
     - name: Upload firmware to cowtransfer
       id: cowtransfer
       if: steps.organize.outputs.status == 'success' && env.UPLOAD_COWTRANSFER == 'true' && !cancelled()
+      continue-on-error: true
       run: |
         curl -fsSL git.io/file-transfer | sh
         ./transfer cow --block 2621440 -s -p 64 --no-progress ${FIRMWARE} 2>&1 | tee cowtransfer.log
@@ -206,20 +356,22 @@ jobs:
     - name: Upload firmware to WeTransfer
       id: wetransfer
       if: steps.organize.outputs.status == 'success' && env.UPLOAD_WETRANSFER == 'true' && !cancelled()
+      continue-on-error: true
       run: |
         curl -fsSL git.io/file-transfer | sh
         ./transfer wet -s -p 16 --no-progress ${FIRMWARE} 2>&1 | tee wetransfer.log
         echo "::warning file=wetransfer.com::$(cat wetransfer.log | grep https)"
         echo "url=$(cat wetransfer.log | grep https | cut -f3 -d" ")" >> $GITHUB_OUTPUT
 
+    # ==================== Release 管理 ====================
     - name: Generate release tag
       id: tag
       if: env.UPLOAD_RELEASE == 'true' && !cancelled()
       run: |
         echo "release_tag=$(date +"%Y.%m.%d-%H%M")" >> $GITHUB_OUTPUT
         touch release.txt
-        [ $UPLOAD_COWTRANSFER = true ] && echo "🔗 [Cowtransfer](${{ steps.cowtransfer.outputs.url }})" >> release.txt
-        [ $UPLOAD_WETRANSFER = true ] && echo "🔗 [WeTransfer](${{ steps.wetransfer.outputs.url }})" >> release.txt
+        [ "$UPLOAD_COWTRANSFER" = "true" ] && echo "🔗 [Cowtransfer](${{ steps.cowtransfer.outputs.url }})" >> release.txt
+        [ "$UPLOAD_WETRANSFER" = "true" ] && echo "🔗 [WeTransfer](${{ steps.wetransfer.outputs.url }})" >> release.txt
         echo "status=success" >> $GITHUB_OUTPUT
 
     - name: Upload firmware to release
@@ -231,6 +383,7 @@ jobs:
         tag_name: ${{ steps.tag.outputs.release_tag }}
         body_path: release.txt
         files: ${{ env.FIRMWARE }}/*
+        generate_release_notes: false
 
     - name: Delete workflow runs
       uses: Mattraks/delete-workflow-runs@v2
@@ -245,6 +398,11 @@ jobs:
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       run: |
-        gh release list --limit 100 --json tagName \
-          | jq -r '.[3:][].tagName' \
-          | xargs -I {} sh -c 'gh release delete {} --yes && git push origin --delete {} 2>/dev/null || true'
+        echo "Keeping last 3 releases, deleting older ones..."
+        gh release list --limit 100 --json tagName --jq '.[].tagName' \
+          | tail -n +4 \
+          | while read tag; do
+              echo "Deleting old release: $tag"
+              gh release delete "$tag" --yes
+              git push origin --delete "$tag" 2>/dev/null || true
+            done
