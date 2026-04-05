@@ -32,7 +32,8 @@ env:
 jobs:
   build:
     runs-on: ubuntu-22.04
-
+    timeout-minutes: 120
+    
     steps:
     - name: Before freeing up disk space
       run: |
@@ -85,8 +86,8 @@ jobs:
       env:
         DEBIAN_FRONTEND: noninteractive
       run: |
-        sudo -E apt-get -qq update
-        sudo -E apt-get -qq install -y \
+        sudo -E apt-get update
+        sudo -E apt-get install -y \
         ack antlr3 asciidoc autoconf automake autopoint binutils bison build-essential \
         bzip2 ccache cmake cpio curl device-tree-compiler fastjar flex gawk gettext \
         gcc-multilib g++-multilib git gperf haveged help2man intltool libc6-dev-i386 \
