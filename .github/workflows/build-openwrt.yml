@@ -92,7 +92,7 @@ jobs:
     - name: Maximize build space
       uses: easimon/maximize-build-space@master
       with:
-        root-reserve-mb: 2048
+        root-reserve-mb: 4096
         swap-size-mb: 1024
         remove-dotnet: 'false'
         remove-android: 'false'
@@ -108,14 +108,16 @@ jobs:
       env:
         DEBIAN_FRONTEND: noninteractive
       run: |
-        sudo rm -rf /var/cache/apt/archives/*
-        sudo mkdir -p /var/cache/apt/archives/partial
-        
-        # 遵循官方指南：update 与 full-upgrade
+        # 1. 更新系统包列表并升级系统
         sudo apt-get update -y
         sudo apt-get full-upgrade -y
         
-        # 遵循官方指南：完整安装编译依赖
+        # 2. 【Copilot 的精髓】在系统升级后、安装庞大依赖前，先彻底清空一次缓存！
+        sudo apt-get clean
+        sudo rm -rf /var/cache/apt/archives/*
+        sudo mkdir -p /var/cache/apt/archives/partial
+        
+        # 3. 安装庞大的编译核心依赖包
         echo "Installing core dependencies..."
         sudo apt-get install -y ack antlr3 asciidoc autoconf automake autopoint binutils bison build-essential \
           bzip2 ccache clang cmake cpio curl device-tree-compiler flex gawk gcc-multilib g++-multilib gettext \
@@ -125,13 +127,14 @@ jobs:
           python3 python3-pyelftools python3-setuptools qemu-utils rsync scons squashfs-tools subversion \
           swig texinfo uglifyjs upx-ucl unzip vim wget xmlto xxd zlib1g-dev python2.7 liblua5.3-dev lua5.3 libev-dev
         
+        # 4. 再次清理，把刚才下载的几百兆依赖包缓存删掉
         sudo apt-get clean
         sudo rm -rf /var/cache/apt/archives/*
         
         sudo timedatectl set-timezone "$TZ"
         sudo chown $USER:$GROUPS $GITHUB_WORKSPACE
         echo "Dependencies installation completed!"
-
+      
     # ==================== 代码准备 ====================
     - name: Clone source code
       run: git clone --depth=1 $REPO_URL -b $REPO_BRANCH openwrt
